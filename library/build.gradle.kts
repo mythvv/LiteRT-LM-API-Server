@@ -34,19 +34,23 @@ android {
 }
 
 dependencies {
-    // LiteRT LM SDK
-    implementation("com.google.ai.edge.litertlm:litertlm-android:1.2.0")
+    // LiteRT LM SDK (api so app module can access)
+    api("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
 
-    // Ktor Server
-    implementation("io.ktor:ktor-server-netty:2.3.12")
-    implementation("io.ktor:ktor-server-content-negotiation:2.3.12")
-    implementation("io.ktor:ktor-serialization-gson:2.3.12")
-    implementation("io.ktor:ktor-server-cors:2.3.12")
-    implementation("io.ktor:ktor-server-status-pages:2.3.12")
+    // Ktor Server (api so app module can access)
+    api("io.ktor:ktor-server-netty:2.3.12")
+    api("io.ktor:ktor-server-content-negotiation:2.3.12")
+    api("io.ktor:ktor-serialization-gson:2.3.12")
+    api("io.ktor:ktor-server-cors:2.3.12")
+    api("io.ktor:ktor-server-status-pages:2.3.12")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Serialization
-    implementation("com.google.code.gson:gson:2.10.1")
+    api("com.google.code.gson:gson:2.10.1")
+
+    // AndroidX Core + Notifications (for Foreground Service)
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core:1.15.0")
 }

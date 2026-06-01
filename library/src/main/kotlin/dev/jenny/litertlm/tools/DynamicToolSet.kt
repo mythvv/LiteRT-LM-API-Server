@@ -1,8 +1,8 @@
 package dev.jenny.litertlm.tools
 
 import android.util.Log
-import dev.jenny.litertlm.models.Tool
-import dev.jenny.litertlm.models.ChatRequest
+import dev.jenny.litertlm.data.Tool
+import dev.jenny.litertlm.data.ChatRequest
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.gson.Gson
 
@@ -23,7 +23,7 @@ class DynamicToolSet(
             return DynamicToolSet(tools.map { tool ->
                 Tool(
                     type = tool.type,
-                    function = dev.jenny.litertlm.models.ToolFunction(
+                    function = dev.jenny.litertlm.data.ToolFunction(
                         name = tool.function.name,
                         description = tool.function.description,
                         parameters = tool.function.parameters

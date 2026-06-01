@@ -1,24 +1,38 @@
+# IDE
 *.iml
-.gradle
-/local.properties
 /.idea
 .DS_Store
+
+# Build
 /build
-/captures
+**/build/
 .externalNativeBuild
 .cxx
+bin/
+gen/
+out/
+
+# Gradle
+.gradle/
+.kotlin/
 local.properties
+/local.properties
+
+# APK / AAB
 *.apk
+!app/*.apk
 *.aab
 *.ap_
 *.dex
 *.class
-bin/
-gen/
-out/
-.gradle/
-build/
+
+# Logs
 *.log
+
+# Secrets
 .env
 keystore.jks
 keystore.properties
+
+# Backup files
+*.bak

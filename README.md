@@ -29,14 +29,16 @@ Turn any Android device into a local AI API endpoint. Run LLMs entirely on-devic
                    │ HTTP / SSE
                    │ :8080
 ┌──────────────────▼──────────────────────┐
-│         LiteRtApiServer (Ktor)           │
-│  ┌─────────────┐ ┌───────────────────┐  │
-│  │ SessionMgr  │ │ DynamicToolSet    │  │
-│  └──────┬──────┘ └────────┬──────────┘  │
-│         └────────┬────────┘              │
+│         ModelApiService (Ktor)           │
+│  ┌──────────────┐  ┌────────────────┐   │
+│  │ SessionMgr   │  │ DynamicToolSet │   │
+│  │ (SessionMeta)│  └───────┬────────┘   │
+│  └──────┬───────┘          │            │
+│         └────────┬─────────┘            │
 │           ┌──────▼──────┐                │
 │           │ ModelEngine │                │
 │           │  Manager    │                │
+│           │ (Conv Cache)│                │
 │           └──────┬──────┘                │
 └──────────────────┼──────────────────────┘
                    │
@@ -79,24 +81,98 @@ curl http://<phone-ip>:8080/v1/chat/completions \
   }'
 ```
 
+## ✅ OpenAI API Compatibility
+
+All core endpoints and parameters from the OpenAI Chat Completions API have been verified against real device tests (Gemma 3 1B IT-INT4 on Android). **18/18 tests passed.**
+
+### Endpoints
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/health` | GET | ✅ Verified |
+| `/v1/models` | GET | ✅ Verified |
+| `/v1/chat/completions` | POST | ✅ Verified |
+| `/v1/sessions` | GET | ✅ Verified |
+| `/stats` | GET | ✅ Verified |
+
+### Parameters
+
+| Parameter | Status | Notes |
+|-----------|--------|-------|
+| `stream` (true/false) | ✅ | SSE streaming with `data: [DONE]` terminator |
+| `messages` (system/user/assistant) | ✅ | Multi-turn conversation supported |
+| `temperature` | ✅ | Sampling temperature control |
+| `top_p` | ✅ | Nucleus sampling |
+| `max_tokens` | ✅ | Response length limiting |
+| `n` | ✅ | Multiple completions per request |
+| `stop` | ✅ | Custom stop sequences |
+| `model` | ✅ | Model selection (with graceful fallback for unknown models) |
+| `stream` + `n` combined | ✅ | Streaming with multiple completions |
+
+### Edge Cases
+
+| Case | Status | Notes |
+|------|--------|-------|
+| `messages` omitted (null) | ✅ | Handled gracefully |
+| Empty user content | ✅ | No crash |
+| Unknown model name | ✅ | Falls back to loaded model |
+| Stream chunk `role` field | ✅ | First chunk includes `"role": "assistant"` |
+
+### Test Environment
+
+- **Device:** Android 13
+- **Model:** Gemma 3 1B IT-INT4
+- **Server:** Ktor on port 8080
+- **Date:** 2026-06-01
+- **Result:** 18/18 passed, 0 failed
+
+### Example Responses
+
+**Non-stream:**
+
+```json
+{
+  "choices": [{
+    "finish_reason": "stop",
+    "index": 0,
+    "message": {"content": "Hello!", "role": "assistant"}
+  }],
+  "model": "gemma3-1b-it-int4",
+  "object": "chat.completion",
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 3,
+    "total_tokens": 17,
+    "context_remaining": 4079,
+    "max_context_tokens": 4096
+  }
+}
+```
+
+**Stream (SSE):**
+
+```
+data: {"choices":[{"delta":{"role":"assistant"},"index":0}],"object":"chat.completion.chunk",...}
+data: {"choices":[{"delta":{"content":"Hello!"},"index":0}],"object":"chat.completion.chunk",...}
+data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],...,"usage":{"completion_tokens":3,...}}
+data: [DONE]
+```
+
+> **Note:** The response includes an extra `session_id` field for session tracking, and `usage` includes `context_remaining` / `max_context_tokens` for on-device context window awareness. These are extensions beyond the standard OpenAI API.
+
 ## Project Structure
 
 ```
 litertlm-api-server/
-├── library/                        # 📦 Core Library (Apache 2.0)
+├── library/                            # 📦 Core Library (Apache 2.0)
 │   └── src/main/kotlin/dev/jenny/litertlm/
-│       ├── engine/                  # ModelEngineManager
-│       ├── session/                 # SessionManager
-│       ├── tools/                   # DynamicToolSet
-│       ├── models/                  # Data classes
-│       └── server/                  # LiteRtApiServer (Ktor routes)
-├── app/                            # 📱 Android App (Proprietary)
-│   └── src/main/kotlin/dev/jenny/litertlm/app/
-│       ├── MainActivity.kt
-│       ├── ChatActivity.kt
-│       ├── ModelApiService.kt
-│       └── ...
-├── LICENSE                         # Apache 2.0 (for core library)
+│       ├── data/                        # ChatRequest, ChatResponse, Models
+│       │   └── repository/             # IModelRepository, SharedPrefsRepository
+│       ├── manager/                     # ModelEngineManager, SessionManager
+│       ├── server/                      # ModelApiService (Ktor routes)
+│       └── tools/                       # DynamicToolSet
+├── app/                                # 📱 Pre-built APK (Proprietary)
+├── LICENSE                             # Apache 2.0
 └── README.md
 ```
 
