@@ -321,10 +321,11 @@ class ModelApiService : Service() {
 
         val systemMessage = request.messages.find { it.role == "system" }
         val systemPrompt = when (systemMessage?.content) {
-            is ChatRequest.MessageContent.Text -> (systemMessage.content as ChatRequest.MessageContent.Text).text
+            is ChatRequest.MessageContent.Text -> (systemMessage!!.content as ChatRequest.MessageContent.Text).text
             is ChatRequest.MessageContent.MultiPart ->
-                (systemMessage.content as ChatRequest.MessageContent.MultiPart).parts
+                (systemMessage!!.content as ChatRequest.MessageContent.MultiPart).parts
                     .filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+            null -> null
             else -> null
         }
 
@@ -599,11 +600,15 @@ class ModelApiService : Service() {
                         val lastUserMsg = request.messages.lastOrNull { it.role != "system" }
                         if (lastUserMsg != null) {
                             val userText = when (lastUserMsg.content) {
-                                is ChatRequest.MessageContent.Text -> lastUserMsg.content.text
+                                is ChatRequest.MessageContent.Text -> lastUserMsg.content!!.text
                                 is ChatRequest.MessageContent.MultiPart ->
-                                    lastUserMsg.content.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                                    lastUserMsg.content!!.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                                null -> ""
+                                else -> ""
                             }
-                            sessMgr.addUserMessage(sessionId, userText)
+                            if (userText.isNotEmpty()) {
+                                sessMgr.addUserMessage(sessionId, userText)
+                            }
                             sessMgr.addAssistantMessage(sessionId, textContent)
                         }
                     }
@@ -663,6 +668,22 @@ class ModelApiService : Service() {
         // Add current request messages (skip system)
         for (msg in messages) {
             if (msg.role == "system") continue
+            // Skip assistant messages with null content (e.g. tool_calls-only responses)
+            if (msg.role == "assistant" && msg.content == null) continue
+            // Handle tool role: embed tool result as text
+            if (msg.role == "tool") {
+                val toolText = when (val c = msg.content) {
+                    is ChatRequest.MessageContent.Text -> c.text
+                    is ChatRequest.MessageContent.MultiPart ->
+                        c.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                    null -> ""
+                    else -> ""
+                }
+                if (toolText.isNotEmpty()) {
+                    allContents.add(Content.Text("Tool result: $toolText"))
+                }
+                continue
+            }
             val parsed = parseMessageContent(msg.content)
             allContents.addAll(parsed)
         }
@@ -706,7 +727,8 @@ class ModelApiService : Service() {
         )
     }
 
-    private fun parseMessageContent(content: ChatRequest.MessageContent): List<Content> {
+    private fun parseMessageContent(content: ChatRequest.MessageContent?): List<Content> {
+        if (content == null) return emptyList()
         return when (content) {
             is ChatRequest.MessageContent.Text -> listOf(Content.Text(content.text))
             is ChatRequest.MessageContent.MultiPart -> content.parts.mapNotNull { part ->

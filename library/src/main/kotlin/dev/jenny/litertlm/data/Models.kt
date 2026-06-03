@@ -48,7 +48,7 @@ data class ToolCallFunction(
 data class Message(
     val role: String,
     @JsonAdapter(MessageContentSerializer::class)
-    val content: MessageContent,
+    val content: MessageContent? = null,
     val tool_calls: List<ToolCall>? = null,
     val tool_call_id: String? = null
 ) {

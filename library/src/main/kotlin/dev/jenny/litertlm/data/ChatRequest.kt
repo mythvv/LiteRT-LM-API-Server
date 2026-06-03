@@ -22,7 +22,7 @@ data class ChatRequest(
     data class Message(
         val role: String,
         @JsonAdapter(ChatRequestContentSerializer::class)
-        val content: MessageContent
+        val content: MessageContent? = null
     )
     
     data class Tool(
