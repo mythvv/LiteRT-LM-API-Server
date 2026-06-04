@@ -53,7 +53,20 @@ class SessionManager(
         cleanupJob = CoroutineScope(Dispatchers.Default).launch {
             while (isActive) {
                 delay(60 * 1000L)
-                cleanupExpiredSessions()
+                val now = System.currentTimeMillis()
+                lock.lock()
+                try {
+                    val expired = sessions.entries
+                        .filter { now - it.value.lastAccessTime > sessionTimeoutMs }
+                        .map { it.key }
+                        .toList()
+                    expired.forEach { sessions.remove(it) }
+                    if (expired.isNotEmpty()) {
+                        Log.d(TAG, "Cleaned up ${expired.size} expired sessions")
+                    }
+                } finally {
+                    lock.unlock()
+                }
             }
         }
     }

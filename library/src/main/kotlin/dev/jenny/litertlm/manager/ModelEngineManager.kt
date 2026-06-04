@@ -65,32 +65,32 @@ class ModelEngineManager private constructor(private val context: Context) {
                 }
 
                 val modelFile = resolveModelFile(model)
-                val builder = EngineConfig.Builder(modelFile.absolutePath)
 
-                val backends = mutableListOf<Backend>()
-                if (model.enableNpu) {
-                    backends.add(Backend.ACCELERATOR)
-                }
-                backends.add(Backend.CPU)
-                builder.setBackends(backends)
-
-                if (model.enableSpeculativeDecoding) {
-                    builder.setSpeculativeDecodingEnabled(true)
+                val backend = when (model.preferBackend) {
+                    "CPU" -> Backend.CPU()
+                    "NPU" -> Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+                    else -> Backend.GPU()
                 }
 
-                val engineConfig = builder.build()
-                val engine = Engine.createEngine(engineConfig)
+                val engineConfig = EngineConfig(
+                    modelPath = modelFile.absolutePath,
+                    backend = backend,
+                    visionBackend = null,
+                    audioBackend = null,
+                    maxNumTokens = model.maxContextSize,
+                    maxNumImages = null,
+                    cacheDir = null
+                )
+                val engine = Engine(engineConfig)
 
                 currentEngine = engine
 
-                modelToUpdate = model.copy(isRunning = true)
+                modelToUpdate = model
                 _runningModel = modelToUpdate
                 _runningModelState.value = modelToUpdate
 
                 result = Result.success(Unit)
                 Log.d("ModelEngineManager", "Model started: ${model.name}")
-
-                context.sendBroadcast(Intent("dev.jenny.litertlm.MODEL_STARTED"))
             } catch (e: Exception) {
                 Log.e("ModelEngineManager", "Failed to start model: ${e.message}")
                 currentEngine = null
@@ -117,10 +117,9 @@ class ModelEngineManager private constructor(private val context: Context) {
         }
 
         _runningModel?.let { oldModel ->
-            val updated = oldModel.copy(isRunning = false)
             _runningModel = null
             _runningModelState.value = null
-            modelManager.updateModel(updated)
+            modelManager.updateModel(oldModel)
         }
 
         tempModelFile?.let { file ->
@@ -144,28 +143,34 @@ class ModelEngineManager private constructor(private val context: Context) {
     }
 
     private suspend fun resolveModelFile(model: ModelItem): File = withContext(Dispatchers.IO) {
+        val path = model.localPath
         when {
-            model.filePath.isNotEmpty() -> File(model.filePath)
+            path.startsWith("content://") -> {
+                val uri = Uri.parse(path)
+                var resolved: String? = null
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        val fdPath = java.io.File("/proc/self/fd/${pfd.fd}").canonicalPath
+                        if (fdPath.startsWith("/storage/") || fdPath.startsWith("/data/")) {
+                            if (java.io.File(fdPath).exists()) resolved = fdPath
+                        }
+                    }
+                } catch (_: Exception) {}
 
-            model.url.isNotEmpty() -> {
-                val fileName = model.url.substringAfterLast("/").substringBefore("?")
-                val targetFile = File(context.filesDir, "models/$fileName")
-                if (!targetFile.exists()) {
-                    throw IllegalStateException("Model file not downloaded: $fileName")
+                if (resolved != null) {
+                    File(resolved!!)
+                } else {
+                    val fileName = model.name + ".litertlm"
+                    val tempFile = File(context.filesDir, "models/$fileName")
+                    tempFile.parentFile?.mkdirs()
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    tempModelFile = tempFile
+                    tempFile
                 }
-                targetFile
             }
-
-            model.assetPath.isNotEmpty() -> {
-                val inputFile = context.assets.open(model.assetPath)
-                val tempFile = File(context.cacheDir, "model_${System.currentTimeMillis()}.task")
-                inputFile.use { input ->
-                    tempFile.outputStream().use { output -> input.copyTo(output) }
-                }
-                tempModelFile = tempFile
-                tempFile
-            }
-
+            path.startsWith("/") -> File(path)
             else -> throw IllegalStateException("No model source specified")
         }
     }
@@ -196,6 +201,58 @@ class ModelEngineManager private constructor(private val context: Context) {
             activeConversation = conversation
             return conversation
         }
+    }
+
+    /**
+     * Get or create a cached Conversation for the given sessionId.
+     * If the cached Conversation is still alive, reuse it.
+     * If dead or missing, create a new one with the provided config.
+     */
+    fun getOrCreateConversation(
+        sessionId: String,
+        tools: List<ToolProvider>? = null,
+        temperature: Double? = null,
+        topP: Double? = null,
+        maxTokens: Int? = null,
+        systemPrompt: String? = null
+    ): Conversation? {
+        // Check cache first
+        val existing = conversationCache[sessionId]
+        if (existing != null) {
+            if (existing.isAlive) {
+                activeConversation = existing
+                return existing
+            }
+            // Dead conversation — clean up
+            try { existing.close() } catch (_: Exception) {}
+            conversationCache.remove(sessionId)
+        }
+
+        // Close any other active conversation (engine allows only one at a time)
+        activeConversation?.let { oldConv ->
+            if (oldConv !== existing) {
+                try { oldConv.close() } catch (_: Exception) {}
+                conversationCache.entries.removeIf { it.value === oldConv }
+            }
+        }
+        activeConversation = null
+
+        // Build sampler config from model defaults + overrides
+        val model = _runningModel
+        val samplerConfig = SamplerConfig(
+            topK = model?.topK ?: 40,
+            topP = topP ?: model?.topP ?: 0.95,
+            temperature = temperature ?: model?.temperature ?: 0.8,
+            seed = 0
+        )
+
+        // Create new conversation via existing createConversation
+        return createConversation(
+            sessionId = sessionId,
+            samplerConfig = samplerConfig,
+            tools = tools,
+            overrideSystemPrompt = systemPrompt
+        )
     }
 
     fun getConversation(sessionId: String): Conversation? = conversationCache[sessionId]

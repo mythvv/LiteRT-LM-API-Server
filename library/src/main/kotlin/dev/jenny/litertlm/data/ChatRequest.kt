@@ -22,7 +22,21 @@ data class ChatRequest(
     data class Message(
         val role: String,
         @JsonAdapter(ChatRequestContentSerializer::class)
-        val content: MessageContent? = null
+        val content: MessageContent? = null,
+        val tool_calls: List<RequestToolCall>? = null,
+        val tool_call_id: String? = null
+    )
+
+    // 请求中的 tool_calls 格式（OpenAI 标准）
+    data class RequestToolCall(
+        val id: String,
+        val type: String = "function",
+        val function: RequestToolCallFunction
+    )
+
+    data class RequestToolCallFunction(
+        val name: String,
+        val arguments: String
     )
     
     data class Tool(

@@ -15,9 +15,13 @@ import androidx.core.app.NotificationCompat
 import dev.jenny.litertlm.data.ChatRequest
 import dev.jenny.litertlm.data.ChatResponse
 import dev.jenny.litertlm.data.HealthResponse
-import dev.jenny.litertlm.data.ModelData
+import com.google.ai.edge.litertlm.BenchmarkInfo
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Content
+import dev.jenny.litertlm.data.ModelItem
 import dev.jenny.litertlm.data.ModelManager
 import dev.jenny.litertlm.data.ModelsResponse
+import dev.jenny.litertlm.data.ModelData as ApiModelData
 import dev.jenny.litertlm.data.SessionInfo
 import dev.jenny.litertlm.data.SessionsResponse
 import dev.jenny.litertlm.data.StatsResponse
@@ -26,7 +30,7 @@ import dev.jenny.litertlm.manager.SessionConfig
 import dev.jenny.litertlm.manager.SessionManager
 import dev.jenny.litertlm.manager.SessionMeta
 import dev.jenny.litertlm.tools.DynamicToolSet
-import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.tool
 import com.google.gson.Gson
 import io.ktor.http.ContentType
@@ -186,7 +190,7 @@ class ModelApiService : Service() {
                     val models = modelManager.getAllModels()
                     val response = ModelsResponse(
                         data = models.map { model ->
-                            ModelData(id = model.id, created = model.createTime / 1000)
+                            ApiModelData(id = model.id, created = model.createTime / 1000)
                         }
                     )
                     call.respond(response)
@@ -232,7 +236,7 @@ class ModelApiService : Service() {
                     val sessMgr = sessionManager
                     if (sessionId != null && sessMgr != null) {
                         engineManager.closeConversation(sessionId)
-                        sessMgr.removeSession(sessionId)
+                        sessMgr.resetSession(sessionId)
                         call.respond(mapOf("status" to "deleted", "session_id" to sessionId))
                     } else {
                         call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid session ID"))
@@ -240,18 +244,20 @@ class ModelApiService : Service() {
                 }
 
                 get("/v1/stats") {
-                    synchronized(statsLock) {
-                        call.respond(StatsResponse(
+                    val stats = synchronized(statsLock) {
+                        StatsResponse(
                             total_requests = totalRequests,
                             total_tokens = totalTokens,
-                            avg_latency_ms = avgLatencyMs.toLong(),
+                            avg_latency_ms = avgLatencyMs,
                             max_latency_ms = maxLatencyMs,
                             min_latency_ms = if (minLatencyMs == Long.MAX_VALUE) 0 else minLatencyMs,
-                            uptime_ms = System.currentTimeMillis() - serviceStartTime,
                             active_sessions = sessionManager?.getSessionCount() ?: 0,
-                            current_model = engineManager.runningModel?.name
-                        ))
+                            current_model = engineManager.runningModel?.name,
+                            backend = null,
+                            tokens_per_second = null
+                        )
                     }
+                    call.respond(stats)
                 }
 
                 post("/v1/chat/completions") {
@@ -310,16 +316,17 @@ class ModelApiService : Service() {
     private suspend fun processChatRequest(
         call: ApplicationCall,
         request: ChatRequest,
-        runningModel: dev.jenny.litertlm.data.ModelItem,
+        runningModel: ModelItem,
         sessMgr: SessionManager
     ) {
+        val messages = request.messages ?: emptyList()
         val startTime = System.currentTimeMillis()
 
         val liteRtTools = request.tools?.let {
             DynamicToolSet.fromChatRequest(it).toToolProviders().map { tool(it) }
         }
 
-        val systemMessage = request.messages.find { it.role == "system" }
+        val systemMessage = messages.find { it.role == "system" }
         val systemPrompt = when (systemMessage?.content) {
             is ChatRequest.MessageContent.Text -> (systemMessage!!.content as ChatRequest.MessageContent.Text).text
             is ChatRequest.MessageContent.MultiPart ->
@@ -365,8 +372,18 @@ class ModelApiService : Service() {
 
         val currentRequestCount = requestCounter.incrementAndGet()
 
+        // Check if current request contains tool result messages (tool calling round-trip)
+        val toolMessages = messages.filter { it.role == "tool" }
+        if (!isStateless && toolMessages.isNotEmpty() && sessionId != null) {
+            handleToolResultMessages(
+                call, request, runningModel, sessMgr, sessionId, sessionMeta,
+                toolMessages, messages, conversation, startTime, currentRequestCount
+            )
+            return
+        }
+
         // Build full context contents from session history + current messages
-        val allContents = buildAllContents(request.messages, sessionMeta, isStateless)
+        val allContents = buildAllContents(messages, sessionMeta, isStateless)
 
         if (request.stream) {
             call.respondTextWriter(contentType = ContentType.Text.EventStream) {
@@ -384,7 +401,7 @@ class ModelApiService : Service() {
                         id = "chatcmpl-${System.currentTimeMillis()}",
                         `object` = "chat.completion.chunk",
                         model = runningModel.name,
-                        choices = listOf(ChatResponse.StreamChunk(
+                        choices = listOf(ChatResponse.Choice(
                             index = 0,
                             delta = ChatResponse.Delta(role = "assistant"),
                             finish_reason = null
@@ -432,7 +449,7 @@ class ModelApiService : Service() {
                                 id = "chatcmpl-${System.currentTimeMillis()}",
                                 `object` = "chat.completion.chunk",
                                 model = runningModel.name,
-                                choices = listOf(ChatResponse.StreamChunk(
+                                choices = listOf(ChatResponse.Choice(
                                     index = 0,
                                     delta = ChatResponse.Delta(content = buffer.toString()),
                                     finish_reason = null
@@ -455,7 +472,7 @@ class ModelApiService : Service() {
                             id = "chatcmpl-${System.currentTimeMillis()}",
                             `object` = "chat.completion.chunk",
                             model = runningModel.name,
-                            choices = listOf(ChatResponse.StreamChunk(
+                            choices = listOf(ChatResponse.Choice(
                                 index = 0,
                                 delta = ChatResponse.Delta(
                                     tool_calls = toolCallsList
@@ -467,6 +484,25 @@ class ModelApiService : Service() {
                         )
                         write("data: ${gson.toJson(toolChunk)}\n\n")
                         flush()
+
+                        // Record tool call in session history for streaming path
+                        if (sessionId != null) {
+                            val lastUserMsg = messages.lastOrNull { it.role != "system" }
+                            if (lastUserMsg != null) {
+                                val userText = when (lastUserMsg.content) {
+                                    is ChatRequest.MessageContent.Text -> lastUserMsg.content!!.text
+                                    is ChatRequest.MessageContent.MultiPart ->
+                                        lastUserMsg.content!!.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                                    null -> ""
+                                    else -> ""
+                                }
+                                if (userText.isNotEmpty()) {
+                                    sessMgr.addUserMessage(sessionId, userText)
+                                }
+                            }
+                            val toolCallSummary = toolCallsList!!.joinToString("; ") { "${it.function.name}(${it.function.arguments})" }
+                            sessMgr.addAssistantMessage(sessionId, "[tool_calls:$toolCallSummary]")
+                        }
                     } else {
                         val finishReason = when {
                             truncated -> "length"
@@ -476,7 +512,7 @@ class ModelApiService : Service() {
                             id = "chatcmpl-${System.currentTimeMillis()}",
                             `object` = "chat.completion.chunk",
                             model = runningModel.name,
-                            choices = listOf(ChatResponse.StreamChunk(
+                            choices = listOf(ChatResponse.Choice(
                                 index = 0,
                                 delta = ChatResponse.Delta(),
                                 finish_reason = finishReason
@@ -502,7 +538,7 @@ class ModelApiService : Service() {
                     val errorMsg = e.message ?: "Unknown error"
                     if (errorMsg.contains("roles must alternate") || errorMsg.contains("Conversation roles")) {
                         Log.w("ModelApiService", "Role alternation error, resetting session: $sessionId")
-                        sessMgr.removeSession(sessionId ?: "")
+                        sessMgr.resetSession(sessionId ?: "")
                         engineManager.closeConversation(sessionId ?: "")
                         try {
                             write("data: ${gson.toJson(mapOf("error" to "Session reset, please retry"))}\n\n")
@@ -510,7 +546,7 @@ class ModelApiService : Service() {
                         } catch (_: Exception) {}
                     } else if (errorMsg.contains("not alive") || errorMsg.contains("Conversation is not alive")) {
                         Log.w("ModelApiService", "Session conversation not alive, resetting")
-                        sessMgr.removeSession(sessionId ?: "")
+                        sessMgr.resetSession(sessionId ?: "")
                         engineManager.closeConversation(sessionId ?: "")
                         try {
                             write("data: ${gson.toJson(mapOf("error" to "Session reset, please retry"))}\n\n")
@@ -560,6 +596,26 @@ class ModelApiService : Service() {
                         )
                     }
 
+                    // Record tool call round-trip in session history
+                    if (sessionId != null) {
+                        val lastUserMsg = messages.lastOrNull { it.role != "system" }
+                        if (lastUserMsg != null) {
+                            val userText = when (lastUserMsg.content) {
+                                is ChatRequest.MessageContent.Text -> lastUserMsg.content!!.text
+                                is ChatRequest.MessageContent.MultiPart ->
+                                    lastUserMsg.content!!.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                                null -> ""
+                                else -> ""
+                            }
+                            if (userText.isNotEmpty()) {
+                                sessMgr.addUserMessage(sessionId, userText)
+                            }
+                        }
+                        // Record assistant tool_calls as a marker in history
+                        val toolCallSummary = toolCallsList.joinToString("; ") { "${it.function.name}(${it.function.arguments})" }
+                        sessMgr.addAssistantMessage(sessionId, "[tool_calls:$toolCallSummary]")
+                    }
+
                     call.respond(ChatResponse(
                         id = "chatcmpl-${System.currentTimeMillis()}",
                         `object` = "chat.completion",
@@ -597,7 +653,7 @@ class ModelApiService : Service() {
 
                     // Record messages in session history
                     if (sessionId != null) {
-                        val lastUserMsg = request.messages.lastOrNull { it.role != "system" }
+                        val lastUserMsg = messages.lastOrNull { it.role != "system" }
                         if (lastUserMsg != null) {
                             val userText = when (lastUserMsg.content) {
                                 is ChatRequest.MessageContent.Text -> lastUserMsg.content!!.text
@@ -633,11 +689,11 @@ class ModelApiService : Service() {
                 val errorMsg = e.message ?: "Unknown error"
                 Log.e("ModelApiService", "Non-stream error: $errorMsg")
                 if (errorMsg.contains("roles must alternate") || errorMsg.contains("Conversation roles")) {
-                    sessMgr.removeSession(sessionId ?: "")
+                    sessMgr.resetSession(sessionId ?: "")
                     engineManager.closeConversation(sessionId ?: "")
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Session reset, please retry"))
                 } else if (errorMsg.contains("not alive") || errorMsg.contains("Conversation is not alive")) {
-                    sessMgr.removeSession(sessionId ?: "")
+                    sessMgr.resetSession(sessionId ?: "")
                     engineManager.closeConversation(sessionId ?: "")
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Session reset, please retry"))
                 } else {
@@ -645,6 +701,164 @@ class ModelApiService : Service() {
                 }
                 return
             }
+        }
+    }
+
+    /**
+     * Handle tool result messages for stateful tool calling round-trip.
+     * Uses Content.ToolResponse for structured tool results instead of
+     * rebuilding full history via buildAllContents.
+     */
+    private suspend fun handleToolResultMessages(
+        call: ApplicationCall,
+        request: ChatRequest,
+        runningModel: ModelItem,
+        sessMgr: SessionManager,
+        sessionId: String,
+        sessionMeta: SessionMeta,
+        toolMessages: List<ChatRequest.Message>,
+        allMessages: List<ChatRequest.Message>,
+        conversation: com.google.ai.edge.litertlm.Conversation,
+        startTime: Long,
+        currentRequestCount: Int
+    ) {
+        try {
+            // Build tool result contents using Content.ToolResponse
+            val toolContents = mutableListOf<Content>()
+
+            // Find the assistant message with tool_calls that preceded the tool results
+            val assistantToolCallMsg = allMessages.lastOrNull {
+                it.role == "assistant" && it.tool_calls != null
+            }
+
+            for (toolMsg in toolMessages) {
+                val toolResultText = when (val c = toolMsg.content) {
+                    is ChatRequest.MessageContent.Text -> c.text
+                    is ChatRequest.MessageContent.MultiPart ->
+                        c.parts.filter { it.type == "text" }.joinToString(" ") { it.text ?: "" }
+                    null -> ""
+                    else -> ""
+                }
+
+                // Match tool_call_id to find the function name from the preceding assistant tool_calls
+                val toolCallId = toolMsg.tool_call_id
+                val functionName = assistantToolCallMsg?.tool_calls
+                    ?.find { it.id == toolCallId }?.function?.name ?: toolCallId ?: "unknown"
+
+                // Use Content.ToolResponse for structured tool result
+                if (toolResultText.isNotEmpty()) {
+                    toolContents.add(Content.ToolResponse(functionName, toolResultText))
+                }
+
+                // Record tool result in session history
+                sessMgr.addToolResultMessage(sessionId, toolCallId ?: "", toolResultText)
+            }
+
+            if (toolContents.isEmpty()) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Empty tool result contents"))
+                return
+            }
+
+            // For stateful mode: send only tool result contents to the existing conversation
+            // The conversation already has the full context from previous turns
+            val message = conversation.sendMessageAsync(Contents.of(toolContents))
+
+            // Collect the model's response after processing tool results
+            val responseContents = StringBuilder()
+            var responseTokenCount = 0
+            var hasMoreToolCalls = false
+            var nextToolCallsList: List<ChatResponse.ToolCall>? = null
+
+            var benchmark: BenchmarkInfo? = null
+            message.collect { msg ->
+                if (msg.contents.contents.isNotEmpty()) {
+                    for (content in msg.contents.contents) {
+                        if (content is Content.Text) {
+                            responseContents.append(content.text)
+                        }
+                    }
+                }
+                responseTokenCount++
+
+                if (msg.toolCalls.isNotEmpty()) {
+                    hasMoreToolCalls = true
+                    nextToolCallsList = msg.toolCalls.mapIndexed { index, tc ->
+                        ChatResponse.ToolCall(
+                            id = "call_${System.currentTimeMillis()}_${index}",
+                            type = "function",
+                            function = ChatResponse.FunctionCall(
+                                name = tc.name,
+                                arguments = gson.toJson(tc.arguments)
+                            )
+                        )
+                    }
+                }
+
+                @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
+                benchmark = conversation.getBenchmarkInfo()
+            }
+
+            val usage = buildUsage(benchmark!!, sessionId, sessMgr)
+            val elapsed = System.currentTimeMillis() - startTime
+
+            if (sessionId != null) {
+                sessMgr.updateTokens(sessionId, usage.total_tokens)
+            }
+            engineManager.updateBenchmarkInfo(benchmark, currentRequestCount)
+            updateStats(elapsed, usage.total_tokens)
+
+            // Record assistant response in session history
+            val responseText = responseContents.toString()
+            if (sessionId != null && responseText.isNotEmpty()) {
+                sessMgr.addAssistantMessage(sessionId, responseText)
+            }
+
+            // Build response
+            if (hasMoreToolCalls && nextToolCallsList != null) {
+                // Model wants to make more tool calls
+                call.respond(ChatResponse(
+                    id = "chatcmpl-${System.currentTimeMillis()}",
+                    `object` = "chat.completion",
+                    model = runningModel.name,
+                    choices = listOf(ChatResponse.Choice(
+                        index = 0,
+                        message = ChatResponse.MessageResponse(
+                            role = "assistant",
+                            content = null,
+                            tool_calls = nextToolCallsList
+                        ),
+                        finish_reason = "tool_calls"
+                    )),
+                    session_id = sessionId,
+                    usage = usage
+                ))
+            } else {
+                // Normal text response after tool processing
+                call.respond(ChatResponse(
+                    id = "chatcmpl-${System.currentTimeMillis()}",
+                    `object` = "chat.completion",
+                    model = runningModel.name,
+                    choices = listOf(ChatResponse.Choice(
+                        index = 0,
+                        message = ChatResponse.MessageResponse(
+                            role = "assistant",
+                            content = responseText
+                        ),
+                        finish_reason = "stop"
+                    )),
+                    session_id = sessionId,
+                    usage = usage
+                ))
+            }
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: "Unknown error"
+            if (errorMsg.contains("roles must alternate") || errorMsg.contains("Conversation roles")) {
+                Log.w("ModelApiService", "Role alternation error in tool result handling, resetting session: $sessionId")
+                sessMgr.resetSession(sessionId)
+                engineManager.closeConversation(sessionId)
+            }
+            Log.e("ModelApiService", "Error handling tool result messages: $errorMsg", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to errorMsg))
         }
     }
 
@@ -738,7 +952,7 @@ class ModelApiService : Service() {
                     "input_audio" -> part.input_audio?.let { audio ->
                         try {
                             val audioBytes = Base64.getDecoder().decode(audio.data)
-                            Content.AudioBytes(audioBytes, audio.format)
+                            Content.AudioBytes(audioBytes)
                         } catch (_: Exception) { null }
                     }
                     else -> null

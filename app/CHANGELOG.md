@@ -6,35 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Unreleased] — 2026-06-03
+## [1.1.0] — 2026-06-04
 
 ### Added
 
-- **OpenAI-compatible Tool Calling** — request messages now support `tool_calls` and `tool_call_id` fields (`ChatRequest.Message`), matching the OpenAI Chat Completions spec.
-- **ProGuard rules for Netty/Ktor** — added keep rules for `io.netty.**` to prevent reflection-based runtime crashes in release builds.
+- **Built-in tool auto-injection** — when no `tools` array is provided in the request, the server automatically injects the built-in tool set, so simple clients can use tool calling without specifying tool definitions.
+- **Tool call round limit** — client-side safety guard: tool-calling loops are capped at 5 rounds to prevent infinite recursion.
+- **Conversation history accumulation** — `ChatActivity` now accumulates full multi-turn message history (including tool call/result exchanges) and sends it with every request, eliminating the need for server-side session state.
 
 ### Changed
 
-- **Model import: OpenDocumentTree only** — removed the legacy "pick single file" flow (`ACTION_OPEN_DOCUMENT`) and `getRealPathFromUri()` heuristic. Models are now imported exclusively via folder scanning (`ACTION_OPEN_DOCUMENT_TREE` + `resolveTreeUriToPath`), giving direct filesystem paths without fragile content:// resolution.
-- **Model loading: resolve content:// via /proc/self/fd/** — `ModelEngineManager` now tries to resolve a content URI to a real path through `/proc/self/fd/` first, falling back to copying to internal storage only when necessary. Resolved paths are persisted back to `localPath` so re-resolution is not needed on every startup.
-- **Session-based Conversation reuse** — replaced the stateless prefix-caching mechanism with per-session `Conversation` objects via `getOrCreateConversation()`. Stateful sessions only send the last user message (preventing token accumulation from re-sending full history each turn).
-- **ChatActivity: local API calls** — switched API endpoint from `${LiteRtApplication.ipAddress.value}` to `127.0.0.1` for more reliable local inference.
-- **ChatActivity: modern Activity Result API** — image/audio pickers migrated from `onActivityResult` to `registerForActivityResult(ActivityResultContracts.OpenDocument)`.
-- **ChatActivity: Kotlin idiomatic OkHttp** — `RequestBody.create()` → `RequestBody.Companion.toRequestBody()`.
-
-### Fixed
-
-- **Null safety in system prompt parsing** — added smart-cast for `systemMessage?.content` with an explicit `else -> null` branch, eliminating potential `ClassCastException`.
-- **sessionId null guard** — token counting and assistant message persistence now check `sessionId != null` before accessing session state, preventing NPE in edge cases.
-- **Benchmark token count defaults** — `lastPrefillTokenCount` and `lastDecodeTokenCount` now default to `0` when null.
+- **Stateless API requests** — removed `session_id` from all client requests. The app now sends the complete conversation context in each request instead of relying on server-side sessions. This simplifies the server architecture and avoids stale session resource leaks.
+- **Tool call deduplication** — added per-message dedup tracking (`lastExecutedToolCalls`) to prevent the same tool call from being executed twice on UI redraws.
+- **Improved tool integration** — `ModelApiService` now routes client-provided tools through the same `DynamicToolSet` pipeline, unifying handling of user-defined and built-in tools.
 
 ### Removed
 
-- **Stateless prefix cache** — `getStatelessConversationForPrefix()` and `updateStatelessPrefixCache()` removed; replaced by session-based Conversation reuse.
-- **SessionManager.getHistory() / toLiteRtMessages()** — no longer needed; the SDK Conversation object manages its own history.
-- **`StoredMessage` import in ModelApiService** — unused after session history refactor.
-
----
+- **Session cleanup on exit** — the `onDestroy` HTTP DELETE to `/v1/sessions/{sid}` is no longer needed since sessions are not used.
+- **Session ID reset after summarization** — removed the UUID regeneration that followed conversation summarization.
 
 ## [1.0.0] — 2026-06-02
 
