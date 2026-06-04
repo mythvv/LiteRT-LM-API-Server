@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Mobile API Server</title>
+    <style>
+        :root {
+            --primary: #1976D2;
+            --bg: #FFFFFF;
+            --bg-card: #F8F9FA;
+            --text: #333333;
+            --text-secondary: #666666;
+            --border: #E0E0E0;
+            --accent-green: #4CAF50;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --primary: #64B5F6;
+                --bg: #121212;
+                --bg-card: #1E1E1E;
+                --text: #E0E0E0;
+                --text-secondary: #B0B0B0;
+                --border: #333333;
+                --accent-green: #66BB6A;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text);
+            line-height: 1.7; max-width: 800px; margin: 0 auto; padding: 20px 16px;
+        }
+        .lang-switch { display: flex; gap: 8px; margin-bottom: 24px; }
+        .lang-btn {
+            padding: 8px 20px; border: 2px solid var(--primary); background: transparent;
+            color: var(--primary); border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+        }
+        .lang-btn.active { background: var(--primary); color: #FFF; }
+        .lang-btn:hover { opacity: 0.85; }
+        h1 { font-size: 28px; margin-bottom: 8px; color: var(--primary); }
+        .update-date { color: var(--text-secondary); font-size: 14px; margin-bottom: 32px; }
+        .section {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+        }
+        .section h2 { font-size: 18px; color: var(--primary); margin-bottom: 12px; }
+        .section p { margin-bottom: 10px; }
+        .section ul { padding-left: 20px; margin-bottom: 10px; }
+        .section li { margin-bottom: 8px; }
+        .section li strong { color: var(--primary); }
+        .highlight-box {
+            background: linear-gradient(135deg, #E8F5E9, #C8E6C9);
+            border-left: 4px solid var(--accent-green);
+            padding: 16px 20px; border-radius: 0 8px 8px 0; margin: 16px 0; font-weight: 500;
+        }
+        @media (prefers-color-scheme: dark) {
+            .highlight-box { background: linear-gradient(135deg, #1B3A1B, #2E4A2E); }
+        }
+        .footer {
+            text-align: center; color: var(--text-secondary); font-size: 13px;
+            margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border);
+        }
+        .footer a { color: var(--primary); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+        .content-block { display: none; }
+        .content-block.active { display: block; }
+    </style>
+</head>
+<body>
+<div class="lang-switch">
+    <button class="lang-btn active" onclick="switchLang('en')">English</button>
+    <button class="lang-btn" onclick="switchLang('zh')">中文</button>
+</div>
+
+<div id="content-en" class="content-block active">
+    <h1>Privacy Policy</h1>
+    <p class="update-date">Last updated: June 4, 2026</p>
+    <div class="highlight-box">✅ This app does NOT collect, store, or transmit any personal user data. All AI inference runs 100% on your device.</div>
+    <div class="section"><h2>📋 1. Overview</h2><p>Mobile API Server is a tool application that runs AI large language models locally on Android devices and provides services through an OpenAI-compatible API. We highly value your privacy.</p></div>
+    <div class="section"><h2>🚫 2. Data Collection</h2><p>This app does not collect, store, or transmit any personal user information. All AI model inference is completed entirely on your device locally. Your conversation content, model configuration, or any data will not be sent to any remote server.</p></div>
+    <div class="section"><h2>🔑 3. Permission Details</h2><p>This app requests the following permissions:</p><ul><li><strong>Storage Permission</strong> (MANAGE_EXTERNAL_STORAGE / READ_MEDIA_IMAGES): Read and manage AI model files and user-selected images.</li><li><strong>Notification Permission</strong> (POST_NOTIFICATIONS): Display API service status when the foreground service is running.</li><li><strong>Foreground Service Permission</strong> (FOREGROUND_SERVICE / FOREGROUND_SERVICE_SPECIAL_USE): Continuously run the API server in the background.</li><li><strong>Network Permission</strong> (INTERNET): Provide API services on the local network.</li><li><strong>Wake Lock</strong> (WAKE_LOCK): Keep the device running during long inference sessions.</li></ul></div>
+    <div class="section"><h2>💾 4. Local Data Storage</h2><p>All configuration and conversation data are stored only locally on your device (SharedPreferences) and will not be uploaded or synced to any cloud.</p></div>
+    <div class="section"><h2>🏢 5. Third-party Services</h2><p>This app does not integrate any third-party analytics, advertising, or data collection services.</p></div>
+    <div class="section"><h2>📦 6. Open Source Components</h2><ul><li><strong>LiteRT LM</strong> — Google AI Edge local inference engine</li><li><strong>Ktor</strong> — Kotlin HTTP server framework</li><li><strong>OkHttp</strong> — HTTP client</li><li><strong>Markwon</strong> — Markdown rendering</li></ul></div>
+    <div class="section"><h2>📧 7. Contact</h2><p>For privacy-related questions, please contact us through <a href="https://github.com/user/litertlm-api-app/issues" style="color:var(--primary)">GitHub Issues</a>.</p></div>
+</div>
+
+<div id="content-zh" class="content-block">
+    <h1>隐私政策</h1>
+    <p class="update-date">最后更新：2026年6月4日</p>
+    <div class="highlight-box">✅ 本应用不收集、不存储、不传输任何用户个人数据。所有AI推理100%在您的设备本地完成。</div>
+    <div class="section"><h2>📋 1. 概述</h2><p>Mobile API Server（以下简称"本应用"）是一款在 Android 设备本地运行 AI 大语言模型并通过 OpenAI 兼容 API 提供服务的工具应用。我们高度重视您的隐私。</p></div>
+    <div class="section"><h2>🚫 2. 数据收集</h2><p>本应用不收集、不存储、不传输任何用户个人信息。所有 AI 模型推理完全在您的设备本地完成，不会将您的对话内容、模型配置或任何数据发送到任何远程服务器。</p></div>
+    <div class="section"><h2>🔑 3. 权限说明</h2><p>本应用请求以下权限：</p><ul><li><strong>存储权限</strong>（MANAGE_EXTERNAL_STORAGE / READ_MEDIA_IMAGES）：读取和管理设备上的 AI 模型文件及用户选择的图片。</li><li><strong>通知权限</strong>（POST_NOTIFICATIONS）：在前台服务运行时显示 API 服务状态通知。</li><li><strong>前台服务权限</strong>（FOREGROUND_SERVICE / FOREGROUND_SERVICE_SPECIAL_USE）：在后台持续运行 API 服务器。</li><li><strong>网络权限</strong>（INTERNET）：在本地网络提供 API 服务。</li><li><strong>唤醒锁</strong>（WAKE_LOCK）：在长时间推理期间保持设备运行。</li></ul></div>
+    <div class="section"><h2>💾 4. 本地数据存储</h2><p>本应用的所有配置和对话数据仅存储在您的设备本地（SharedPreferences），不会上传或同步到任何云端。</p></div>
+    <div class="section"><h2>🏢 5. 第三方服务</h2><p>本应用不集成任何第三方分析、广告或数据收集服务。</p></div>
+    <div class="section"><h2>📦 6. 开源组件</h2><ul><li><strong>LiteRT LM</strong> — Google AI Edge 本地推理引擎</li><li><strong>Ktor</strong> — Kotlin HTTP 服务器框架</li><li><strong>OkHttp</strong> — HTTP 客户端</li><li><strong>Markwon</strong> — Markdown 渲染</li></ul></div>
+    <div class="section"><h2>📧 7. 联系方式</h2><p>如有隐私相关问题，请通过 <a href="https://github.com/user/litertlm-api-app/issues" style="color:var(--primary)">GitHub Issues</a> 联系我们。</p></div>
+</div>
+
+<div class="footer"><p>© 2026 Mobile API Server · <a href="https://github.com/user/litertlm-api-app">GitHub</a></p></div>
+<script>
+function switchLang(lang){
+    document.getElementById('content-en').classList.toggle('active',lang==='en');
+    document.getElementById('content-zh').classList.toggle('active',lang==='zh');
+    document.querySelectorAll('.lang-btn').forEach(function(b,i){b.classList.toggle('active',(i===0&&lang==='en')||(i===1&&lang==='zh'));});
+}
+</script>
+</body>
+</html>
