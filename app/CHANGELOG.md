@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.1.1] — 2026-06-05
+
+### Fixed
+
+- **Empty response after tool execution** — added a deterministic fallback builder that extracts tool results from the message history when the model returns empty text, ensuring the user always sees meaningful output.
+- **Lifecycle crash during tool calls** — `requestSummaryAfterTool` is now launched inside `lifecycleScope` with an `isDestroyed` / `isFinishing` guard, preventing crashes when the activity is finishing.
+- **False "network error" on deliberate cancellation** — introduced a `deliberatelyCancelled` flag so that user-initiated stream cancellations no longer trigger the error toast.
+- **Missing chat history update after tool result** — when a fallback text is generated, the in-memory message list and recycler view are now updated immediately so the UI stays in sync.
+
+### Changed
+
+- **Gemma 4 model detection** — switched from manual string checks to a regex pattern (`gemma[-_ ]?4`), making detection more robust across different naming conventions.
+- **Default location for weather tool** — if the user doesn't specify a city, the tool now defaults to "New York" instead of failing.
+- **Default URL for web fetch tool** — if the user doesn't specify a URL, the tool now defaults to Google News homepage instead of failing.
+
+---
+
 ## [1.1.0] — 2026-06-04
 
 ### Added
