@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/banner.png" alt="LiteRT LM API Server" width="100%">
+</div>
+
 # LiteRT LM API Server
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
